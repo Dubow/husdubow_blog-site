@@ -1,12 +1,16 @@
 const express = require('express');
 const mysql = require('mysql2');
 const dotenv = require('dotenv');
+const cloudinary = require('cloudinary').v2;
+
 dotenv.config();
-
 const app = express();
-app.use(express.json());
-app.use(express.static('../public')); // Serve frontend files
 
+// Middleware
+app.use(express.json());
+app.use(express.static('../public'));
+
+// MySQL Connection
 const db = mysql.createConnection({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
@@ -19,4 +23,20 @@ db.connect(err => {
     console.log('MySQL Connected');
 });
 
-app.listen(3000, () => console.log('Server running on port 3000'));
+// Cloudinary Configuration
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// Test Route
+app.get('/api/test', (req, res) => {
+    res.json({ message: 'Server is running!' });
+});
+
+// Start Server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});

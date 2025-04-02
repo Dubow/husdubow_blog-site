@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <h1>Admin Panel</h1>
+    
+    <!-- Login Form -->
+    <div id="login-section" style="display: block;">
+        <h2>Login</h2>
+        <form id="login-form">
+            <input type="text" id="username" placeholder="Username" required>
+            <input type="password" id="password" placeholder="Password" required>
+            <button type="submit">Login</button>
+        </form>
+    </div>
+
+    <!-- Upload Form (Hidden until logged in) -->
+    <div id="upload-section" style="display: none;">
+        <h2>Create Post</h2>
+        <form id="upload-form">
+            <input type="text" id="title" placeholder="Title" required>
+            <textarea id="content" placeholder="Content"></textarea>
+            <select id="type" required>
+                <option value="article">Article</option>
+                <option value="picture">Picture</option>
+                <option value="video">Video</option>
+            </select>
+            <input type="file" id="file" accept="image/*,video/*" required>
+            <button type="submit">Upload</button>
+        </form>
+        <button id="logout">Logout</button>
+    </div>
+
+    <script src="/js/admin.js"></script>
+</body>
+</html>

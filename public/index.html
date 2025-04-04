@@ -3,14 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="/css/styles.css">
-    <title>Hussein Dubow</title>
+    <link rel="stylesheet" href="/css/index.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <title>Hussein Dubow's Blog</title>
+    <meta property="og:title" content="Hussein Dubow's Blog">
+    <meta property="og:description" content="Thoughts, stories and ideas">
+    <meta property="og:type" content="website">
+    <meta name="twitter:card" content="summary_large_image">
 </head>
 <body>
-    <h1>Welcome to My Blog</h1>
-    <div class="posts">
-        <!-- Posts will be rendered server-side -->
+    <header class="blog-header">
+        <h1>Hussein Dubow's Blog</h1>
+        <nav class="auth-links">
+            <a href="/signup.html" class="btn">Sign Up</a>
+            <a href="/login.html" class="btn">Login</a>
+        </nav>
+        <button class="menu-toggle"><i class="fas fa-bars"></i></button>
+    </header>
+
+    <div class="mobile-auth-menu">
+        <nav class="auth-links">
+            <a href="/signup.html" class="btn">Sign Up</a>
+            <a href="/login.html" class="btn">Login</a>
+        </nav>
     </div>
-    <a href="/signup">Sign Up</a> | <a href="/login">Login</a>
+    
+    <main class="blog-container">
+        <div id="posts-container" class="posts-grid">
+            <!-- Posts will be loaded here -->
+        </div>
+    </main>
+
+    <footer class="blog-footer">
+        <p>© 2025 Dr Hussein Dubow. All rights reserved.</p>
+    </footer>
+
+    <script src="/js/blog.js"></script>
 </body>
 </html>

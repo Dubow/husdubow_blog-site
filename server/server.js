@@ -314,37 +314,43 @@ app.get('/admin/analytics', authMiddleware, adminMiddleware, (req, res) => {
 
     let groupBy;
     switch (period) {
-        case 'day': groupBy = 'DATE(created_at)'; break;
-        case 'week': groupBy = 'WEEK(created_at)'; break;
-        case 'month': groupBy = 'MONTH(created_at)'; break;
-        case 'year': groupBy = 'YEAR(created_at)'; break;
+        case 'day': groupBy = 'DATE'; break;
+        case 'week': groupBy = 'WEEK'; break;
+        case 'month': groupBy = 'MONTH'; break;
+        case 'year': groupBy = 'YEAR'; break;
         default: return res.status(400).json({ error: 'Invalid period' });
     }
 
-    db.query(
-        `SELECT ${groupBy} as period, COUNT(*) as count FROM likes 
-         JOIN posts ON likes.post_id = posts.id 
-         WHERE posts.user_id = ? 
-         GROUP BY ${groupBy}`,
-        [req.user.id],
-        (err, likes) => {
-            if (err) return res.status(500).json({ error: 'Database error' });
+    const likesQuery = `
+        SELECT ${groupBy}(likes.created_at) as period, COUNT(*) as count 
+        FROM likes 
+        JOIN posts ON likes.post_id = posts.id 
+        WHERE posts.user_id = ? 
+        GROUP BY ${groupBy}(likes.created_at)
+    `;
+    const commentsQuery = `
+        SELECT ${groupBy}(comments.created_at) as period, COUNT(*) as count 
+        FROM comments 
+        JOIN posts ON comments.post_id = posts.id 
+        WHERE posts.user_id = ? 
+        GROUP BY ${groupBy}(comments.created_at)
+    `;
 
-            db.query(
-                `SELECT ${groupBy} as period, COUNT(*) as count FROM comments 
-                 JOIN posts ON comments.post_id = posts.id 
-                 WHERE posts.user_id = ? 
-                 GROUP BY ${groupBy}`,
-                [req.user.id],
-                (err, comments) => {
-                    if (err) return res.status(500).json({ error: 'Database error' });
-                    res.json({ likes, comments });
-                }
-            );
+    db.query(likesQuery, [req.user.id], (err, likes) => {
+        if (err) {
+            console.error('Likes query error:', err);
+            return res.status(500).json({ error: 'Database error in likes query', details: err.message });
         }
-    );
-});
 
+        db.query(commentsQuery, [req.user.id], (err, comments) => {
+            if (err) {
+                console.error('Comments query error:', err);
+                return res.status(500).json({ error: 'Database error in comments query', details: err.message });
+            }
+            res.json({ likes, comments });
+        });
+    });
+});
 // Helper function for like count
 function getUpdatedLikeCount(postId, res) {
     db.query('SELECT COUNT(*) as count FROM likes WHERE post_id = ?', 

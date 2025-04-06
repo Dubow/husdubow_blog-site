@@ -23,6 +23,9 @@ body {
     background-color: var(--background-color);
     color: var(--text-color);
     line-height: 1.5;
+    min-height: 100vh; /* Ensure body takes at least full viewport height */
+    display: flex; /* Use flexbox to manage layout */
+    flex-direction: column; /* Stack children vertically */
 }
 
 /* ========== PUBLIC BLOG STYLES ========== */
@@ -89,7 +92,7 @@ body {
     max-width: 1200px;
     margin: 0 auto;
     padding: 40px 20px;
-    min-height: calc(100vh - 150px);
+    flex: 1; /* Grow to fill remaining space, pushing footer to bottom */
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -99,7 +102,7 @@ body {
     display: grid;
     grid-template-columns: 1fr;
     gap: 35px;
-    width: 100%; /* Reverted to original behavior, matches .blog-container */
+    width: 100%;
 }
 
 .blog-post {
@@ -237,7 +240,8 @@ body {
     gap: 15px;
 }
 
-.like-btn, .comment-btn {
+.like-btn,
+.comment-btn {
     background: none;
     border: none;
     color: var(--text-color);
@@ -250,7 +254,8 @@ body {
     transition: color 0.3s ease;
 }
 
-.like-btn:hover, .comment-btn:hover {
+.like-btn:hover,
+.comment-btn:hover {
     color: var(--primary-color);
 }
 
@@ -258,11 +263,13 @@ body {
     color: var(--danger);
 }
 
-.like-btn i, .comment-btn i {
+.like-btn i,
+.comment-btn i {
     font-size: 1.5rem;
 }
 
-.like-count, .comment-count {
+.like-count,
+.comment-count {
     font-size: 1rem;
     font-weight: 400;
     color: var(--text-color);
@@ -358,8 +365,9 @@ body {
     color: var(--light-text);
     font-size: 0.95rem;
     border-top: 1px solid var(--border-color);
-    margin-top: 60px;
     background-color: var(--white);
+    margin-top: 0; /* Remove margin-top to avoid extra space */
+    width: 100%; /* Ensure footer spans full width */
 }
 
 .loading {
@@ -378,8 +386,12 @@ body {
 }
 
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 .error-message {

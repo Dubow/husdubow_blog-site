@@ -37,7 +37,7 @@ Clean, modern UI with hover effects and animations.
 Hosted on Heroku with MySQL database on Aiven.
 SSL enabled for secure connections.
 
-##Tech Stack
+## Tech Stack
 Backend: Node.js, Express.js
 Database: MySQL (hosted on Aiven)
 Frontend: HTML, CSS, JavaScript
@@ -54,7 +54,7 @@ Dependencies:
            multer: File upload handling
            nodemon: Development server (dev dependency)
 
-##Prerequisites
+## Prerequisites
 Node.js: v18.x or higher
 MySQL: A MySQL database (local or hosted, e.g., on Aiven)
 Heroku Account: For deployment
@@ -64,10 +64,26 @@ Heroku CLI: For deploying to Heroku
 
 ##  Installation
 1: Clone the Repository:
+
 ![image](https://github.com/user-attachments/assets/3347d7a3-b8f4-4504-a350-b5e5355857a0)
 
 
-Install Dependencies:
-bash
+2: Install Dependencies:
 
-npm install
+![image](https://github.com/user-attachments/assets/a57189b0-be92-4780-bb66-bab24f254d02)
+
+3: Run Locally
+
+![image](https://github.com/user-attachments/assets/bded1bb4-c3f7-4806-bb0f-5d4f67d25636)
+
+## Troubleshooting
+#### Database Connection Error:
+Check heroku logs --tail for details.
+
+#### Heroku Deployment Fails:
+Check logs for errors (heroku logs --tail).
+
+Ensure Procfile and package.json have a start script.
+
+## License
+© 2025 Dr. Hussein Dubow. All rights reserved.

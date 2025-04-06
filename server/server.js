@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs'); // Added for SSL CA file
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 console.log('JWT_SECRET:', process.env.JWT_SECRET);
@@ -20,16 +21,23 @@ const upload = multer({
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// MySQL Connection
+// MySQL Connection with Aiven SSL
 const db = mysql.createConnection({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
-    password: process.env.DB_PASS,
-    database: process.env.DB_NAME
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    port: process.env.DB_PORT || 14617, // Include Aiven port
+    ssl: {
+        ca: fs.readFileSync(path.join(__dirname,'..', 'ca.pem')) // Path to CA cert in project
+    }
 });
 
 db.connect(err => {
-    if (err) throw err;
+    if (err) {
+        console.error('MySQL Connection Error:', err);
+        throw err; // Throw to stop the app if connection fails
+    }
     console.log('MySQL Connected');
 });
 
@@ -73,7 +81,7 @@ app.get('/api/posts', (req, res) => {
         GROUP BY p.id
         ORDER BY p.created_at DESC
     `, (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
         res.json(results);
     });
 });
@@ -87,7 +95,7 @@ app.get('/api/posts/:id/comments', (req, res) => {
         WHERE c.post_id = ?
         ORDER BY c.created_at
     `, [req.params.id], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
         res.json(results);
     });
 });
@@ -105,7 +113,7 @@ app.post('/api/signup', (req, res) => {
     }
     
     db.query('SELECT * FROM users WHERE username = ?', [username], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
         if (results.length > 0) return res.status(400).json({ error: 'Username already exists' });
         
         bcrypt.hash(password, 10, (err, hash) => {
@@ -115,7 +123,7 @@ app.post('/api/signup', (req, res) => {
                 'INSERT INTO users (username, password) VALUES (?, ?)',
                 [username, hash],
                 (err) => {
-                    if (err) return res.status(500).json({ error: 'Database error' });
+                    if (err) return res.status(500).json({ error: 'Database error', details: err.message });
                     res.json({ message: 'User created successfully' });
                 }
             );
@@ -128,7 +136,7 @@ app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
     
     db.query('SELECT * FROM users WHERE username = ?', [username], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
         if (results.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
         
         const user = results[0];
@@ -157,19 +165,19 @@ app.post('/api/posts/:id/like', authMiddleware, (req, res) => {
     
     db.query('SELECT id FROM likes WHERE user_id = ? AND post_id = ?', 
     [userId, id], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
         
         if (results.length > 0) {
             // Unlike
             db.query('DELETE FROM likes WHERE id = ?', [results[0].id], (err) => {
-                if (err) return res.status(500).json({ error: 'Database error' });
+                if (err) return res.status(500).json({ error: 'Database error', details: err.message });
                 getUpdatedLikeCount(id, res);
             });
         } else {
             // Like
             db.query('INSERT INTO likes (user_id, post_id) VALUES (?, ?)', 
             [userId, id], (err) => {
-                if (err) return res.status(500).json({ error: 'Database error' });
+                if (err) return res.status(500).json({ error: 'Database error', details: err.message });
                 getUpdatedLikeCount(id, res);
             });
         }
@@ -185,7 +193,7 @@ app.post('/api/posts/:id/comments', authMiddleware, (req, res) => {
         INSERT INTO comments (user_id, post_id, content)
         VALUES (?, ?, ?)
     `, [req.user.id, req.params.id, content], (err, result) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
         
         db.query(`
             SELECT c.*, u.username 
@@ -193,7 +201,7 @@ app.post('/api/posts/:id/comments', authMiddleware, (req, res) => {
             JOIN users u ON c.user_id = u.id
             WHERE c.id = ?
         `, [result.insertId], (err, results) => {
-            if (err) return res.status(500).json({ error: 'Database error' });
+            if (err) return res.status(500).json({ error: 'Database error', details: err.message });
             res.json(results[0]);
         });
     });
@@ -206,7 +214,7 @@ app.post('/admin/login', (req, res) => {
     const { username, password } = req.body;
     
     db.query('SELECT * FROM users WHERE username = ? AND is_admin = TRUE', [username], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
         if (results.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
 
         const user = results[0];
@@ -246,7 +254,7 @@ app.post('/admin/upload', authMiddleware, adminMiddleware, (req, res) => {
         'INSERT INTO posts (title, content, user_id) VALUES (?, ?, ?)',
         [title, content, req.user.id],
         (err) => {
-            if (err) return res.status(500).json({ error: 'Database error' });
+            if (err) return res.status(500).json({ error: 'Database error', details: err.message });
             res.json({ message: 'Post created' });
         }
     );
@@ -258,7 +266,7 @@ app.get('/admin/posts', authMiddleware, adminMiddleware, (req, res) => {
         'SELECT * FROM posts WHERE user_id = ? ORDER BY created_at DESC',
         [req.user.id],
         (err, results) => {
-            if (err) return res.status(500).json({ error: 'Database error' });
+            if (err) return res.status(500).json({ error: 'Database error', details: err.message });
             res.json(results);
         }
     );
@@ -270,14 +278,14 @@ app.put('/admin/posts/:id', authMiddleware, adminMiddleware, (req, res) => {
     const { title, content } = req.body;
 
     db.query('SELECT * FROM posts WHERE id = ? AND user_id = ?', [id, req.user.id], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
         if (results.length === 0) return res.status(404).json({ error: 'Post not found' });
 
         db.query(
             'UPDATE posts SET title = ?, content = ? WHERE id = ?',
             [title, content, id],
             (err) => {
-                if (err) return res.status(500).json({ error: 'Database error' });
+                if (err) return res.status(500).json({ error: 'Database error', details: err.message });
                 res.json({ message: 'Post updated' });
             }
         );
@@ -404,7 +412,7 @@ app.get('/admin/analytics', authMiddleware, adminMiddleware, (req, res) => {
 function getUpdatedLikeCount(postId, res) {
     db.query('SELECT COUNT(*) as count FROM likes WHERE post_id = ?', 
     [postId], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
         res.json({ likes_count: results[0].count });
     });
 }

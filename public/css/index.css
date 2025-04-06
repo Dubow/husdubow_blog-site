@@ -90,12 +90,16 @@ body {
     margin: 0 auto;
     padding: 40px 20px;
     min-height: calc(100vh - 150px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
 .posts-grid {
     display: grid;
     grid-template-columns: 1fr;
     gap: 35px;
+    width: 100%; /* Reverted to original behavior, matches .blog-container */
 }
 
 .blog-post {
@@ -527,18 +531,18 @@ body {
 
 @media (max-width: 768px) {
     .blog-header {
-        flex-direction: row; /* Changed to row to align h1 and menu-toggle side by side */
+        flex-direction: row;
         align-items: center;
-        padding: 15px 10px; /* Reduced padding to minimize side gaps */
-        width: 100%; /* Ensure header takes full width */
+        padding: 15px 10px;
+        width: 100%;
     }
 
     .blog-header h1 {
-        width: auto; /* Allow h1 to take necessary space */
-        text-align: left; /* Align text to the left */
-        margin-bottom: 0; /* Remove margin to align with menu-toggle */
-        flex-grow: 1; /* Allow h1 to take remaining space */
-        padding-left: 10px; /* Small padding for aesthetics */
+        width: auto;
+        text-align: left;
+        margin-bottom: 0;
+        flex-grow: 1;
+        padding-left: 10px;
     }
 
     .blog-header .auth-links {
@@ -549,16 +553,22 @@ body {
 
     .menu-toggle {
         display: block;
-        position: static; /* Remove absolute positioning to align naturally */
-        padding-right: 10px; /* Small padding for aesthetics */
+        position: static;
+        padding-right: 10px;
     }
 
     .mobile-auth-menu {
         display: block;
     }
     
+    .blog-container {
+        padding: 20px;
+    }
+    
     .posts-grid {
-        gap: 25px;
+        gap: 15px;
+        display: flex;
+        flex-direction: column;
     }
     
     .post-actions {
@@ -582,7 +592,7 @@ body {
 
 @media (max-width: 480px) {
     .blog-container {
-        padding: 30px 15px;
+        padding: 15px;
     }
     
     .blog-post {
@@ -618,5 +628,9 @@ body {
     
     .auth-container form {
         padding: 30px 20px;
+    }
+    
+    .posts-grid {
+        gap: 10px;
     }
 }

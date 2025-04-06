@@ -289,21 +289,69 @@ app.delete('/admin/posts/:id', authMiddleware, adminMiddleware, (req, res) => {
     const { id } = req.params;
 
     db.query('SELECT * FROM posts WHERE id = ? AND user_id = ?', [id, req.user.id], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) {
+            console.error('Database error during post fetch:', err);
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
         if (results.length === 0) return res.status(404).json({ error: 'Post not found' });
 
         const post = results[0];
         const mediaUrls = post.content.match(/https:\/\/res\.cloudinary\.com\/[^"]+/g) || [];
-        mediaUrls.forEach(url => {
-            const publicId = url.split('/').pop().split('.')[0];
-            cloudinary.uploader.destroy(publicId, { resource_type: 'auto' }, (error) => {
-                if (error) console.error('Cloudinary delete error:', error);
-            });
-        });
 
-        db.query('DELETE FROM posts WHERE id = ?', [id], (err) => {
-            if (err) return res.status(500).json({ error: 'Database error' });
-            res.json({ message: 'Post deleted' });
+        // Step 1: Delete associated comments
+        db.query('DELETE FROM comments WHERE post_id = ?', [id], (err) => {
+            if (err) {
+                console.error('Database error deleting comments:', err);
+                return res.status(500).json({ error: 'Database error deleting comments', details: err.message });
+            }
+
+            // Step 2: Delete associated likes
+            db.query('DELETE FROM likes WHERE post_id = ?', [id], (err) => {
+                if (err) {
+                    console.error('Database error deleting likes:', err);
+                    return res.status(500).json({ error: 'Database error deleting likes', details: err.message });
+                }
+
+                // Step 3: Delete Cloudinary media
+                let mediaDeleteErrors = [];
+                if (mediaUrls.length > 0) {
+                    let completed = 0;
+                    mediaUrls.forEach(url => {
+                        const publicId = url.split('/').pop().split('.')[0];
+                        cloudinary.uploader.destroy(publicId, { resource_type: 'image' }, (error, result) => {
+                            if (error) {
+                                console.error('Cloudinary delete error:', error);
+                                mediaDeleteErrors.push({ publicId, error: error.message });
+                            }
+                            completed++;
+
+                            // Step 4: Delete the post after all media deletions are attempted
+                            if (completed === mediaUrls.length) {
+                                deletePost();
+                            }
+                        });
+                    });
+                } else {
+                    deletePost();
+                }
+
+                function deletePost() {
+                    db.query('DELETE FROM posts WHERE id = ?', [id], (err) => {
+                        if (err) {
+                            console.error('Database error during post deletion:', err);
+                            return res.status(500).json({ error: 'Database error', details: err.message });
+                        }
+
+                        if (mediaDeleteErrors.length > 0) {
+                            return res.status(207).json({ 
+                                message: 'Post and dependencies deleted, but some media failed to delete',
+                                errors: mediaDeleteErrors 
+                            });
+                        }
+                        res.json({ message: 'Post deleted successfully' });
+                    });
+                }
+            });
         });
     });
 });
@@ -351,6 +399,7 @@ app.get('/admin/analytics', authMiddleware, adminMiddleware, (req, res) => {
         });
     });
 });
+
 // Helper function for like count
 function getUpdatedLikeCount(postId, res) {
     db.query('SELECT COUNT(*) as count FROM likes WHERE post_id = ?', 

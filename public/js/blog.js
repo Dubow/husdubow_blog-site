@@ -350,5 +350,6 @@ function setupMobileMenu() {
         if (!mobileMenu.contains(e.target) && !menuToggle.contains(e.target)) {
             mobileMenu.classList.remove('active');
         }
+        
     });
 }

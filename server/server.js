@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs'); // Added for SSL CA file
+const fs = require('fs');
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 console.log('JWT_SECRET:', process.env.JWT_SECRET);
@@ -21,25 +21,42 @@ const upload = multer({
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// MySQL Connection with Aiven SSL
-const db = mysql.createConnection({
+// MySQL Connection Pool with Aiven SSL
+const pool = mysql.createPool({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
+    password: process.env.DB_PASS,
     database: process.env.DB_NAME,
-    port: process.env.DB_PORT || 14617, // Include Aiven port
+    port: process.env.DB_PORT || 14617,
     ssl: {
-        ca: fs.readFileSync(path.join(__dirname,'..', 'ca.pem')) // Path to CA cert in project
-    }
+        ca: fs.readFileSync(path.join(__dirname, '..', 'ca.pem'))
+    },
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
 });
 
-db.connect(err => {
-    if (err) {
-        console.error('MySQL Connection Error:', err);
-        throw err; // Throw to stop the app if connection fails
-    }
-    console.log('MySQL Connected');
+const db = pool.promise(); // Use promise-based API for async/await
+
+// Log pool events for debugging
+pool.on('connection', () => {
+    console.log('MySQL Pool: New connection established');
 });
+
+pool.on('error', (err) => {
+    console.error('MySQL Pool Error:', err);
+});
+
+// Test the connection on startup
+(async () => {
+    try {
+        await db.query('SELECT 1');
+        console.log('MySQL Connected');
+    } catch (err) {
+        console.error('MySQL Connection Error:', err);
+        throw err;
+    }
+})();
 
 // Cloudinary Configuration
 cloudinary.config({
@@ -69,39 +86,45 @@ const adminMiddleware = (req, res, next) => {
 // ========== PUBLIC ROUTES ========== //
 
 // Get all posts with like/comment counts
-app.get('/api/posts', (req, res) => {
-    db.query(`
-        SELECT p.*, u.username as author,
-               COUNT(DISTINCT l.id) as likes_count,
-               COUNT(DISTINCT c.id) as comments_count
-        FROM posts p
-        JOIN users u ON p.user_id = u.id
-        LEFT JOIN likes l ON p.id = l.post_id
-        LEFT JOIN comments c ON p.id = c.post_id
-        GROUP BY p.id
-        ORDER BY p.created_at DESC
-    `, (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
+app.get('/api/posts', async (req, res) => {
+    try {
+        const [results] = await db.query(`
+            SELECT p.*, u.username as author,
+                   COUNT(DISTINCT l.id) as likes_count,
+                   COUNT(DISTINCT c.id) as comments_count
+            FROM posts p
+            JOIN users u ON p.user_id = u.id
+            LEFT JOIN likes l ON p.id = l.post_id
+            LEFT JOIN comments c ON p.id = c.post_id
+            GROUP BY p.id
+            ORDER BY p.created_at DESC
+        `);
         res.json(results);
-    });
+    } catch (err) {
+        console.error('Database error in /api/posts:', err);
+        res.status(500).json({ error: 'Database error', details: err.message });
+    }
 });
 
 // Get comments for a post
-app.get('/api/posts/:id/comments', (req, res) => {
-    db.query(`
-        SELECT c.*, u.username 
-        FROM comments c
-        JOIN users u ON c.user_id = u.id
-        WHERE c.post_id = ?
-        ORDER BY c.created_at
-    `, [req.params.id], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
+app.get('/api/posts/:id/comments', async (req, res) => {
+    try {
+        const [results] = await db.query(`
+            SELECT c.*, u.username 
+            FROM comments c
+            JOIN users u ON c.user_id = u.id
+            WHERE c.post_id = ?
+            ORDER BY c.created_at
+        `, [req.params.id]);
         res.json(results);
-    });
+    } catch (err) {
+        console.error('Database error in /api/posts/:id/comments:', err);
+        res.status(500).json({ error: 'Database error', details: err.message });
+    }
 });
 
 // User signup
-app.post('/api/signup', (req, res) => {
+app.post('/api/signup', async (req, res) => {
     const { username, password } = req.body;
     
     if (!username || !password) {
@@ -112,125 +135,121 @@ app.post('/api/signup', (req, res) => {
         return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
     
-    db.query('SELECT * FROM users WHERE username = ?', [username], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
-        if (results.length > 0) return res.status(400).json({ error: 'Username already exists' });
+    try {
+        const [existingUsers] = await db.query('SELECT * FROM users WHERE username = ?', [username]);
+        if (existingUsers.length > 0) return res.status(400).json({ error: 'Username already exists' });
         
-        bcrypt.hash(password, 10, (err, hash) => {
-            if (err) return res.status(500).json({ error: 'Server error' });
-            
-            db.query(
-                'INSERT INTO users (username, password) VALUES (?, ?)',
-                [username, hash],
-                (err) => {
-                    if (err) return res.status(500).json({ error: 'Database error', details: err.message });
-                    res.json({ message: 'User created successfully' });
-                }
-            );
-        });
-    });
+        const hash = await bcrypt.hash(password, 10);
+        await db.query('INSERT INTO users (username, password) VALUES (?, ?)', [username, hash]);
+        res.json({ message: 'User created successfully' });
+    } catch (err) {
+        console.error('Database error in /api/signup:', err);
+        res.status(500).json({ error: 'Database error', details: err.message });
+    }
 });
 
 // User login (for both regular users and admin)
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     
-    db.query('SELECT * FROM users WHERE username = ?', [username], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
+    try {
+        const [results] = await db.query('SELECT * FROM users WHERE username = ?', [username]);
         if (results.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
         
         const user = results[0];
-        bcrypt.compare(password, user.password, (err, match) => {
-            if (err) return res.status(500).json({ error: 'Server error' });
-            if (!match) return res.status(401).json({ error: 'Invalid credentials' });
-            
-            const token = jwt.sign({ 
-                id: user.id, 
-                username: user.username,
-                is_admin: user.is_admin 
-            }, process.env.JWT_SECRET, {
-                expiresIn: '7d'
-            });
-            res.json({ token });
+        const match = await bcrypt.compare(password, user.password);
+        if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+        
+        const token = jwt.sign({ 
+            id: user.id, 
+            username: user.username,
+            is_admin: user.is_admin 
+        }, process.env.JWT_SECRET, {
+            expiresIn: '7d'
         });
-    });
+        res.json({ token });
+    } catch (err) {
+        console.error('Database error in /api/login:', err);
+        res.status(500).json({ error: 'Database error', details: err.message });
+    }
 });
 
 // ========== AUTHENTICATED ROUTES ========== //
 
 // Like/Unlike a post
-app.post('/api/posts/:id/like', authMiddleware, (req, res) => {
+app.post('/api/posts/:id/like', authMiddleware, async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
     
-    db.query('SELECT id FROM likes WHERE user_id = ? AND post_id = ?', 
-    [userId, id], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
+    try {
+        const [results] = await db.query('SELECT id FROM likes WHERE user_id = ? AND post_id = ?', [userId, id]);
         
         if (results.length > 0) {
             // Unlike
-            db.query('DELETE FROM likes WHERE id = ?', [results[0].id], (err) => {
-                if (err) return res.status(500).json({ error: 'Database error', details: err.message });
-                getUpdatedLikeCount(id, res);
-            });
+            await db.query('DELETE FROM likes WHERE id = ?', [results[0].id]);
         } else {
             // Like
-            db.query('INSERT INTO likes (user_id, post_id) VALUES (?, ?)', 
-            [userId, id], (err) => {
-                if (err) return res.status(500).json({ error: 'Database error', details: err.message });
-                getUpdatedLikeCount(id, res);
-            });
+            await db.query('INSERT INTO likes (user_id, post_id) VALUES (?, ?)', [userId, id]);
         }
-    });
+        
+        const [likeCount] = await db.query('SELECT COUNT(*) as count FROM likes WHERE post_id = ?', [id]);
+        res.json({ likes_count: likeCount[0].count });
+    } catch (err) {
+        console.error('Database error in /api/posts/:id/like:', err);
+        res.status(500).json({ error: 'Database error', details: err.message });
+    }
 });
 
 // Add comment
-app.post('/api/posts/:id/comments', authMiddleware, (req, res) => {
+app.post('/api/posts/:id/comments', authMiddleware, async (req, res) => {
     const { content } = req.body;
     if (!content) return res.status(400).json({ error: 'Content required' });
     
-    db.query(`
-        INSERT INTO comments (user_id, post_id, content)
-        VALUES (?, ?, ?)
-    `, [req.user.id, req.params.id, content], (err, result) => {
-        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
+    try {
+        const [result] = await db.query(`
+            INSERT INTO comments (user_id, post_id, content)
+            VALUES (?, ?, ?)
+        `, [req.user.id, req.params.id, content]);
         
-        db.query(`
+        const [newComment] = await db.query(`
             SELECT c.*, u.username 
             FROM comments c
             JOIN users u ON c.user_id = u.id
             WHERE c.id = ?
-        `, [result.insertId], (err, results) => {
-            if (err) return res.status(500).json({ error: 'Database error', details: err.message });
-            res.json(results[0]);
-        });
-    });
+        `, [result.insertId]);
+        
+        res.json(newComment[0]);
+    } catch (err) {
+        console.error('Database error in /api/posts/:id/comments:', err);
+        res.status(500).json({ error: 'Database error', details: err.message });
+    }
 });
 
 // ========== ADMIN ROUTES ========== //
 
 // Admin Login
-app.post('/admin/login', (req, res) => {
+app.post('/admin/login', async (req, res) => {
     const { username, password } = req.body;
     
-    db.query('SELECT * FROM users WHERE username = ? AND is_admin = TRUE', [username], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
+    try {
+        const [results] = await db.query('SELECT * FROM users WHERE username = ? AND is_admin = TRUE', [username]);
         if (results.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
 
         const user = results[0];
-        bcrypt.compare(password, user.password, (err, match) => {
-            if (err) return res.status(500).json({ error: 'Server error' });
-            if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+        const match = await bcrypt.compare(password, user.password);
+        if (!match) return res.status(401).json({ error: 'Invalid credentials' });
 
-            const token = jwt.sign({ 
-                id: user.id, 
-                is_admin: user.is_admin 
-            }, process.env.JWT_SECRET, {
-                expiresIn: '1h'
-            });
-            res.json({ token });
+        const token = jwt.sign({ 
+            id: user.id, 
+            is_admin: user.is_admin 
+        }, process.env.JWT_SECRET, {
+            expiresIn: '1h'
         });
-    });
+        res.json({ token });
+    } catch (err) {
+        console.error('Database error in /admin/login:', err);
+        res.status(500).json({ error: 'Database error', details: err.message });
+    }
 });
 
 // Upload Media (For TinyMCE)
@@ -239,7 +258,7 @@ app.post('/admin/upload-media', authMiddleware, adminMiddleware, upload.single('
 
     cloudinary.uploader.upload_stream({ resource_type: 'auto' }, (error, result) => {
         if (error) {
-            console.log('Cloudinary Upload Error:', error);
+            console.error('Cloudinary Upload Error:', error);
             return res.status(500).json({ error: 'Upload failed', details: error.message });
         }
         res.json({ media_url: result.secure_url });
@@ -247,125 +266,95 @@ app.post('/admin/upload-media', authMiddleware, adminMiddleware, upload.single('
 });
 
 // Admin Upload (Create Post)
-app.post('/admin/upload', authMiddleware, adminMiddleware, (req, res) => {
+app.post('/admin/upload', authMiddleware, adminMiddleware, async (req, res) => {
     const { title, content } = req.body;
 
-    db.query(
-        'INSERT INTO posts (title, content, user_id) VALUES (?, ?, ?)',
-        [title, content, req.user.id],
-        (err) => {
-            if (err) return res.status(500).json({ error: 'Database error', details: err.message });
-            res.json({ message: 'Post created' });
-        }
-    );
+    try {
+        await db.query('INSERT INTO posts (title, content, user_id) VALUES (?, ?, ?)', [title, content, req.user.id]);
+        res.json({ message: 'Post created' });
+    } catch (err) {
+        console.error('Database error in /admin/upload:', err);
+        res.status(500).json({ error: 'Database error', details: err.message });
+    }
 });
 
 // Get All Posts (Admin Only)
-app.get('/admin/posts', authMiddleware, adminMiddleware, (req, res) => {
-    db.query(
-        'SELECT * FROM posts WHERE user_id = ? ORDER BY created_at DESC',
-        [req.user.id],
-        (err, results) => {
-            if (err) return res.status(500).json({ error: 'Database error', details: err.message });
-            res.json(results);
-        }
-    );
+app.get('/admin/posts', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const [results] = await db.query('SELECT * FROM posts WHERE user_id = ? ORDER BY created_at DESC', [req.user.id]);
+        res.json(results);
+    } catch (err) {
+        console.error('Database error in /admin/posts:', err);
+        res.status(500).json({ error: 'Database error', details: err.message });
+    }
 });
 
 // Edit Post (Admin Only)
-app.put('/admin/posts/:id', authMiddleware, adminMiddleware, (req, res) => {
+app.put('/admin/posts/:id', authMiddleware, adminMiddleware, async (req, res) => {
     const { id } = req.params;
     const { title, content } = req.body;
 
-    db.query('SELECT * FROM posts WHERE id = ? AND user_id = ?', [id, req.user.id], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
+    try {
+        const [results] = await db.query('SELECT * FROM posts WHERE id = ? AND user_id = ?', [id, req.user.id]);
         if (results.length === 0) return res.status(404).json({ error: 'Post not found' });
 
-        db.query(
-            'UPDATE posts SET title = ?, content = ? WHERE id = ?',
-            [title, content, id],
-            (err) => {
-                if (err) return res.status(500).json({ error: 'Database error', details: err.message });
-                res.json({ message: 'Post updated' });
-            }
-        );
-    });
+        await db.query('UPDATE posts SET title = ?, content = ? WHERE id = ?', [title, content, id]);
+        res.json({ message: 'Post updated' });
+    } catch (err) {
+        console.error('Database error in /admin/posts/:id (PUT):', err);
+        res.status(500).json({ error: 'Database error', details: err.message });
+    }
 });
 
 // Delete Post (Admin Only)
-app.delete('/admin/posts/:id', authMiddleware, adminMiddleware, (req, res) => {
+app.delete('/admin/posts/:id', authMiddleware, adminMiddleware, async (req, res) => {
     const { id } = req.params;
 
-    db.query('SELECT * FROM posts WHERE id = ? AND user_id = ?', [id, req.user.id], (err, results) => {
-        if (err) {
-            console.error('Database error during post fetch:', err);
-            return res.status(500).json({ error: 'Database error', details: err.message });
-        }
+    try {
+        const [results] = await db.query('SELECT * FROM posts WHERE id = ? AND user_id = ?', [id, req.user.id]);
         if (results.length === 0) return res.status(404).json({ error: 'Post not found' });
 
         const post = results[0];
         const mediaUrls = post.content.match(/https:\/\/res\.cloudinary\.com\/[^"]+/g) || [];
 
         // Step 1: Delete associated comments
-        db.query('DELETE FROM comments WHERE post_id = ?', [id], (err) => {
-            if (err) {
-                console.error('Database error deleting comments:', err);
-                return res.status(500).json({ error: 'Database error deleting comments', details: err.message });
+        await db.query('DELETE FROM comments WHERE post_id = ?', [id]);
+
+        // Step 2: Delete associated likes
+        await db.query('DELETE FROM likes WHERE post_id = ?', [id]);
+
+        // Step 3: Delete Cloudinary media
+        let mediaDeleteErrors = [];
+        if (mediaUrls.length > 0) {
+            for (const url of mediaUrls) {
+                const publicId = url.split('/').pop().split('.')[0];
+                try {
+                    await cloudinary.uploader.destroy(publicId, { resource_type: 'image' });
+                } catch (error) {
+                    console.error('Cloudinary delete error:', error);
+                    mediaDeleteErrors.push({ publicId, error: error.message });
+                }
             }
+        }
 
-            // Step 2: Delete associated likes
-            db.query('DELETE FROM likes WHERE post_id = ?', [id], (err) => {
-                if (err) {
-                    console.error('Database error deleting likes:', err);
-                    return res.status(500).json({ error: 'Database error deleting likes', details: err.message });
-                }
+        // Step 4: Delete the post
+        await db.query('DELETE FROM posts WHERE id = ?', [id]);
 
-                // Step 3: Delete Cloudinary media
-                let mediaDeleteErrors = [];
-                if (mediaUrls.length > 0) {
-                    let completed = 0;
-                    mediaUrls.forEach(url => {
-                        const publicId = url.split('/').pop().split('.')[0];
-                        cloudinary.uploader.destroy(publicId, { resource_type: 'image' }, (error, result) => {
-                            if (error) {
-                                console.error('Cloudinary delete error:', error);
-                                mediaDeleteErrors.push({ publicId, error: error.message });
-                            }
-                            completed++;
-
-                            // Step 4: Delete the post after all media deletions are attempted
-                            if (completed === mediaUrls.length) {
-                                deletePost();
-                            }
-                        });
-                    });
-                } else {
-                    deletePost();
-                }
-
-                function deletePost() {
-                    db.query('DELETE FROM posts WHERE id = ?', [id], (err) => {
-                        if (err) {
-                            console.error('Database error during post deletion:', err);
-                            return res.status(500).json({ error: 'Database error', details: err.message });
-                        }
-
-                        if (mediaDeleteErrors.length > 0) {
-                            return res.status(207).json({ 
-                                message: 'Post and dependencies deleted, but some media failed to delete',
-                                errors: mediaDeleteErrors 
-                            });
-                        }
-                        res.json({ message: 'Post deleted successfully' });
-                    });
-                }
+        if (mediaDeleteErrors.length > 0) {
+            return res.status(207).json({ 
+                message: 'Post and dependencies deleted, but some media failed to delete',
+                errors: mediaDeleteErrors 
             });
-        });
-    });
+        }
+        res.json({ message: 'Post deleted successfully' });
+    } catch (err) {
+        console.error('Database error in /admin/posts/:id (DELETE):', err);
+        res.status(500).json({ error: 'Database error', details: err.message });
+    }
 });
 
 // Get Analytics (Admin Only)
-app.get('/admin/analytics', authMiddleware, adminMiddleware, (req, res) => {
+app.get('/admin/analytics', authMiddleware, adminMiddleware, async (req, res) => {
     const { period } = req.query;
 
     let groupBy;
@@ -392,35 +381,25 @@ app.get('/admin/analytics', authMiddleware, adminMiddleware, (req, res) => {
         GROUP BY ${groupBy}(comments.created_at)
     `;
 
-    db.query(likesQuery, [req.user.id], (err, likes) => {
-        if (err) {
-            console.error('Likes query error:', err);
-            return res.status(500).json({ error: 'Database error in likes query', details: err.message });
-        }
-
-        db.query(commentsQuery, [req.user.id], (err, comments) => {
-            if (err) {
-                console.error('Comments query error:', err);
-                return res.status(500).json({ error: 'Database error in comments query', details: err.message });
-            }
-            res.json({ likes, comments });
-        });
-    });
+    try {
+        const [likes] = await db.query(likesQuery, [req.user.id]);
+        const [comments] = await db.query(commentsQuery, [req.user.id]);
+        res.json({ likes, comments });
+    } catch (err) {
+        console.error('Database error in /admin/analytics:', err);
+        res.status(500).json({ error: 'Database error', details: err.message });
+    }
 });
-
-// Helper function for like count
-function getUpdatedLikeCount(postId, res) {
-    db.query('SELECT COUNT(*) as count FROM likes WHERE post_id = ?', 
-    [postId], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error', details: err.message });
-        res.json({ likes_count: results[0].count });
-    });
-}
 
 // Error Handling Middleware
 app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ error: 'Something went wrong!' });
+    console.error('Server Error:', {
+        message: err.message,
+        stack: err.stack,
+        path: req.path,
+        method: req.method
+    });
+    res.status(500).json({ error: 'Something went wrong!', details: err.message });
 });
 
 // Start Server

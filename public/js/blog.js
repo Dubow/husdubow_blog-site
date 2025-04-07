@@ -349,7 +349,6 @@ function setupMobileMenu() {
     document.addEventListener('click', (e) => {
         if (!mobileMenu.contains(e.target) && !menuToggle.contains(e.target)) {
             mobileMenu.classList.remove('active');
-        }
-        
+        } 
     });
 }

@@ -7,13 +7,23 @@ document.addEventListener('DOMContentLoaded', () => {
 async function fetchPosts() {
     try {
         const response = await fetch('/api/posts');
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to fetch posts');
+        }
         const posts = await response.json();
         renderPosts(posts);
     } catch (err) {
         console.error('Error loading posts:', err);
         document.getElementById('posts-container').innerHTML = 
-            '<p class="error">Error loading posts. Please try again later.</p>';
+            '<p class="error">Error loading posts: ' + err.message + '. Please try again later.</p>';
     }
+}
+
+function stripHtml(html) {
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    return div.textContent || div.innerText || '';
 }
 
 function renderPosts(posts) {
@@ -31,10 +41,13 @@ function renderPosts(posts) {
         const hasLiked = localStorage.getItem(`liked_${post.id}`) === 'true';
         const maxPreviewLength = 300;
         const fullContent = post.content;
+        const plainTextContent = stripHtml(fullContent); // Strip HTML for length calculation
         let previewContent = fullContent;
-        if (fullContent.length > maxPreviewLength) {
-            previewContent = fullContent.substring(0, maxPreviewLength) + '...';
+        if (plainTextContent.length > maxPreviewLength) {
+            previewContent = plainTextContent.substring(0, maxPreviewLength) + '...';
         }
+        
+        console.log(`Post ID: ${post.id}, Content Length (plain text): ${plainTextContent.length}`); // Debug log
         
         postEl.innerHTML = `
             <h2 class="post-title">${post.title}</h2>
@@ -44,9 +57,9 @@ function renderPosts(posts) {
             </div>
             <div class="post-content">
                 <div class="post-excerpt" data-state="preview">${previewContent}</div>
-                ${fullContent.length > maxPreviewLength ? 
+                ${plainTextContent.length > maxPreviewLength ? 
                     `<a href="#" class="read-toggle" data-full="${encodeURIComponent(fullContent)}" data-preview="${encodeURIComponent(previewContent)}">Read More</a>` : 
-                    fullContent.length > 0 ? 
+                    plainTextContent.length > 0 ? 
                         `<a href="#" class="read-toggle" data-full="${encodeURIComponent(fullContent)}" data-preview="${encodeURIComponent(previewContent)}" style="display: none;">Read Less</a>` : 
                         ''
                 }
@@ -213,7 +226,9 @@ function setupCommentButtons() {
 }
 
 function setupReadToggles() {
-    document.querySelectorAll('.read-toggle').forEach(toggle => {
+    const toggles = document.querySelectorAll('.read-toggle');
+    console.log('Found read-toggle elements:', toggles.length); // Debug log
+    toggles.forEach(toggle => {
         toggle.addEventListener('click', (e) => {
             e.preventDefault();
             const postContent = toggle.closest('.post-content');
@@ -349,6 +364,6 @@ function setupMobileMenu() {
     document.addEventListener('click', (e) => {
         if (!mobileMenu.contains(e.target) && !menuToggle.contains(e.target)) {
             mobileMenu.classList.remove('active');
-        } 
+        }
     });
 }

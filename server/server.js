@@ -397,6 +397,7 @@ app.get('/admin/analytics', authMiddleware, adminMiddleware, (req, res) => {
             console.error('Likes query error:', err);
             return res.status(500).json({ error: 'Database error in likes query', details: err.message });
         }
+        
 
         db.query(commentsQuery, [req.user.id], (err, comments) => {
             if (err) {

@@ -97,6 +97,9 @@ body {
     flex-direction: column;
     align-items: center;
 }
+.about-me h2{
+    color: #1991da;
+}
 
 .posts-grid {
     display: grid;
